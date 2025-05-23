@@ -143,4 +143,4 @@ Workflow(
 
 ## Documentation - Tutorial
 
-Currently work in progress here:
+Currently work in progress here: https://advanced-stack.com/resources/how-to-build-workflows-trigger-action-program-with-llms.html
