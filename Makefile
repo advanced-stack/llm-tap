@@ -2,7 +2,7 @@
 
 PKG_NAME := llm-tap
 MOD_NAME := llm_tap
-PKG_VERSION := 0.0.2
+PKG_VERSION := 0.0.3
 PKG_DIR := $(shell pwd)
 BUILD_DIR := dist
 SRC_DIR := $(PKG_DIR)/src

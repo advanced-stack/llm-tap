@@ -35,7 +35,7 @@ class Branch:
 
 
 @dataclass
-class Node:
+class Rule:
     name: str
     condition_sets: list[ConditionSet]
     branches: list[Branch]
@@ -46,4 +46,4 @@ class Workflow:
     name: str
     description: str
     triggers: list[Trigger]
-    nodes: list[Node]
+    rules: list[Rule]
