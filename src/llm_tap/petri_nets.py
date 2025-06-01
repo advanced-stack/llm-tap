@@ -2,6 +2,13 @@
 from dataclasses import dataclass, field
 from typing import Any, List, Dict, Callable, Optional, TypeVar, Generic
 
+# Import new spec classes
+from .pn_spec import (
+    SpecPetriNet, SpecPlace, SpecTransition, SpecInputArc, SpecOutputArc,
+    SpecInputArcConsumptionPolicy, SpecOutputArcProductionDetails,
+    SpecGuard, SpecGuardCondition, TokenValue, SpecInitialMarking
+)
+
 # Color can be any Python data type. We can use a TypeVar for generics.
 Color = TypeVar('Color')
 
@@ -37,22 +44,15 @@ class Place:
     """
     name: str
     tokens: List[Token] = field(default_factory=list)
-    # Future extensions: capacity, accepted token types/colors
+    # Removed: capacity, accepted token types/colors - these are now in SpecPlace if needed
 
     def add_token(self, token: Token):
         self.tokens.append(token)
 
     def remove_token(self, token: Token):
-        # Removing the specific token instance might be tricky if multiple
-        # identical tokens exist and hashing/equality is based on value.
-        # For now, assume we remove a token that equals the given token.
-        # If specific instance removal is needed, this logic might need adjustment
-        # or tokens might need unique IDs.
         try:
             self.tokens.remove(token)
         except ValueError:
-            # Token not found, could raise an error or handle silently
-            # For now, let's raise to make it explicit
             raise ValueError(f"Token {token} not found in place {self.name}")
 
     def has_token_of_value(self, value: Any) -> bool:
@@ -67,77 +67,30 @@ class Place:
         """Returns all tokens whose value is an instance of token_type."""
         return [token for token in self.tokens if isinstance(token.value, token_type)]
 
+    def to_spec_place(self) -> SpecPlace:
+        # Description and capacity can be added here if Place objects store them
+        return SpecPlace(name=self.name)
 
-# Forward declaration for Transition type hint in Arc
-class Transition;
 
-@dataclass
-class Arc:
-    """
-    Represents a directed connection.
-    In this initial generic version, arcs are primarily conceptual links.
-    The logic of token consumption/production and quantity/type matching
-    will be handled by the Transition's guard and action functions.
+# Arc class is removed as its functionality is integrated into SpecInputArc/SpecOutputArc
+# and transitions directly link to place names.
 
-    - For an input arc (Place -> Transition): `source` is Place, `target` is Transition.
-    - For an output arc (Transition -> Place): `source` is Transition, `target` is Place.
-    """
-    source_name: str  # Name of the source Place or Transition
-    target_name: str  # Name of the target Place or Transition
-    # Future extensions: weight (how many tokens), arc expression (specific token types)
-
-# Type alias for the structure that guard and action functions will receive
-# It maps input place names to a list of tokens available in that place.
-InputTokenMap = Dict[str, List[Token]]
-
-# Type alias for the structure that action functions should return
-# The first dict maps place names to tokens to be consumed from them.
-# The second dict maps place names to tokens to be produced into them.
-ActionOutput = tuple[Dict[str, List[Token]], Dict[str, List[Token]]]
+# Type aliases InputTokenMap and ActionOutput are removed as they were for the old execution model.
 
 @dataclass
 class Transition:
-    """
-    Represents an event or task in the workflow.
-    A transition can fire if its guard condition is met.
-    Firing a transition consumes tokens from input places and produces tokens in output places
-    as defined by its action function.
-    """
     name: str
-    guard: Callable[[InputTokenMap], bool] = field(default=lambda inputs: True)
-    action: Callable[[InputTokenMap], ActionOutput] = field(default=lambda inputs: ({}, {}))
+    # Guard and action are significantly changed.
+    # These fields are now primarily for programmatic definition if desired,
+    # but their direct translation to SpecGuard/SpecAction is limited.
+    # For to_spec_transition, we primarily use input/output_place_names.
+    guard_callable: Optional[Callable[[Dict[str, List[Token]]], bool]] = field(default=None, repr=False)
+    action_callable: Optional[Callable[[Dict[str, List[Token]]], tuple[Dict[str, List[Token]], Dict[str, List[Token]]]]] = field(default=None, repr=False)
 
-    # Names of input and output places. The PetriNet engine will resolve these.
     input_place_names: List[str] = field(default_factory=list)
     output_place_names: List[str] = field(default_factory=list)
 
-    def is_enabled(self, input_token_map: InputTokenMap) -> bool:
-        """
-        Checks if the transition is enabled based on its guard condition.
-        The input_token_map is provided by the PetriNet engine.
-        """
-        try:
-            return self.guard(input_token_map)
-        except Exception as e:
-            # Optionally log the error
-            # print(f"Error in guard for transition {self.name}: {e}")
-            return False
-
-    def fire(self, input_token_map: InputTokenMap) -> ActionOutput:
-        """
-        Executes the transition's action.
-        The input_token_map is provided by the PetriNet engine.
-        Returns a tuple: (consumed_tokens_map, produced_tokens_map)
-        consumed_tokens_map: {place_name: [Token, ...]}
-        produced_tokens_map: {place_name: [Token, ...]}
-        """
-        try:
-            return self.action(input_token_map)
-        except Exception as e:
-            # Optionally log the error
-            # print(f"Error in action for transition {self.name}: {e}")
-            # Return empty dicts to signify failure or no change
-            return {}, {}
+    # Methods is_enabled and fire are removed (part of old execution model)
 
     def add_input_place_name(self, place_name: str):
         if place_name not in self.input_place_names:
@@ -147,16 +100,60 @@ class Transition:
         if place_name not in self.output_place_names:
             self.output_place_names.append(place_name)
 
+    def to_spec_transition(self) -> SpecTransition:
+        spec_inputs = []
+        for place_name in self.input_place_names:
+            # Default consumption: one "any" token, named after the place
+            spec_inputs.append(
+                SpecInputArc(
+                    place=place_name,
+                    consumption_policy=SpecInputArcConsumptionPolicy(type="any", count=1),
+                    variable_name=f"{place_name}_input_token" # Default variable name
+                )
+            )
+
+        spec_outputs = []
+        for place_name in self.output_place_names:
+            # Default production: one placeholder token
+            spec_outputs.append(
+                SpecOutputArc(
+                    place=place_name,
+                    production_details=SpecOutputArcProductionDetails(
+                        value={"placeholder_value": f"token_produced_for_{place_name}"},
+                        count=1
+                    )
+                )
+            )
+
+        # Guard translation:
+        # Automatic translation of guard_callable to SpecGuard is complex and out of scope.
+        # A transition in the spec without a guard implies it's enabled if inputs are met.
+        # If the original guard_callable was None (always true), this is fine.
+        # If it had logic, that logic is NOT translated here.
+        # Users would need to build SpecGuard manually for the SpecTransition.
+        spec_guard_obj = None # No guard by default in the spec
+
+        # Action translation:
+        # The action_callable's detailed logic (token manipulation, value changes)
+        # is NOT automatically translated into detailed SpecOutputArc production_details modifications.
+        # The SpecOutputArcs created above are placeholders.
+        # Users would need to refine these SpecOutputArcs manually or when creating SpecTransition directly.
+
+        return SpecTransition(
+            name=self.name,
+            description=None, # Can be added if Transition objects store descriptions
+            inputs=spec_inputs,
+            outputs=spec_outputs,
+            guard=spec_guard_obj
+        )
+
 
 @dataclass
 class PetriNet:
-    """
-    The main class for a Colored Petri Net.
-    It holds the places, transitions, and provides methods to execute the net.
-    """
     name: str
     places: Dict[str, Place] = field(default_factory=dict)
     transitions: Dict[str, Transition] = field(default_factory=dict)
+    # Removed: arcs: List[Arc] = field(default_factory=list)
 
     def add_place(self, place: Place):
         if place.name in self.places:
@@ -166,170 +163,49 @@ class PetriNet:
     def add_transition(self, transition: Transition):
         if transition.name in self.transitions:
             raise ValueError(f"Transition with name {transition.name} already exists.")
+        # Ensure input/output places are known (optional strictness)
+        # for place_name in transition.input_place_names:
+        #     if place_name not in self.places:
+        #         raise ValueError(f"Input place {place_name} for transition {transition.name} not found in PetriNet.")
+        # for place_name in transition.output_place_names:
+        #     if place_name not in self.places:
+        #         raise ValueError(f"Output place {place_name} for transition {transition.name} not found in PetriNet.")
         self.transitions[transition.name] = transition
 
+    # Removed: add_arc and add_arc_by_names as Arc class is removed.
+    # Transitions now directly reference place names.
+
     def add_token(self, place_name: str, token: Token):
-        """Adds a token to the specified place."""
         if place_name not in self.places:
             raise ValueError(f"Place {place_name} not found.")
         self.places[place_name].add_token(token)
 
-    def _get_input_token_map_for_transition(self, transition: Transition) -> InputTokenMap:
-        """
-        Constructs the InputTokenMap for a given transition, providing it with
-        the tokens from its declared input places.
-        """
-        input_map: InputTokenMap = {}
-        for place_name in transition.input_place_names:
-            if place_name in self.places:
-                # Provide a copy of the list of tokens to avoid direct modification
-                # of place's tokens by guard or action functions before actual consumption.
-                input_map[place_name] = list(self.places[place_name].tokens)
-            else:
-                # If an input place is declared but not in the net, provide empty list.
-                # Alternatively, this could be an error condition.
-                input_map[place_name] = []
-        return input_map
-
-    def get_enabled_transitions(self) -> List[Transition]:
-        """
-        Returns a list of all transitions that are currently enabled.
-        A transition is enabled if all its input places are defined in the net,
-        and its guard condition evaluates to True.
-        """
-        enabled = []
-        for transition in self.transitions.values():
-            # Check if all input places for the transition exist in the PetriNet
-            all_input_places_exist = all(
-                place_name in self.places for place_name in transition.input_place_names
-            )
-            if not all_input_places_exist:
-                # print(f"Transition {transition.name} disabled: Not all input places are defined in the PetriNet.")
-                continue
-
-            input_token_map = self._get_input_token_map_for_transition(transition)
-            if transition.is_enabled(input_token_map):
-                enabled.append(transition)
-        return enabled
-
-    def fire_transition(self, transition_name: str) -> bool:
-        """
-        Fires a specific transition if it's enabled.
-        Firing involves:
-        1. Checking if the transition exists and is enabled.
-        2. Executing its action function to get consumed and produced tokens.
-        3. Removing consumed tokens from input places.
-        4. Adding produced tokens to output places.
-        Returns True if fired successfully, False otherwise.
-        """
-        if transition_name not in self.transitions:
-            # print(f"Cannot fire: Transition {transition_name} not found.")
-            return False
-
-        transition = self.transitions[transition_name]
-
-        # Check if all input places for the transition exist
-        if not all(place_name in self.places for place_name in transition.input_place_names):
-            # print(f"Transition {transition.name} cannot fire: Not all input places are defined in the PetriNet.")
-            return False
-
-        # Check if all output places for the transition exist (important for producing tokens)
-        if not all(place_name in self.places for place_name in transition.output_place_names):
-            # print(f"Transition {transition.name} cannot fire: Not all output places are defined in the PetriNet.")
-            return False
-
-        input_token_map = self._get_input_token_map_for_transition(transition)
-
-        if not transition.is_enabled(input_token_map):
-            # print(f"Transition {transition.name} is not enabled.")
-            return False
-
-        consumed_map, produced_map = transition.fire(input_token_map)
-
-        # Validate that consumed tokens exist before removing
-        for place_name, tokens_to_consume in consumed_map.items():
-            if place_name not in self.places:
-                # print(f"Error firing {transition.name}: Consuming from non-existent place {place_name}")
-                return False # Abort firing
-            place = self.places[place_name]
-            for token_to_consume in tokens_to_consume:
-                # Ensure the place actually has this token or an equivalent one
-                # This check depends on Token.__eq__ and Place.tokens list contents
-                if token_to_consume not in place.tokens:
-                    # print(f"Error firing {transition.name}: Token {token_to_consume} not found in {place_name} for consumption.")
-                    return False # Abort firing
-
-        # Validate that produced tokens are going to valid places
-        for place_name in produced_map.keys():
-            if place_name not in self.places:
-                 # print(f"Error firing {transition.name}: Producing to non-existent place {place_name}")
-                return False # Abort firing
-            if place_name not in transition.output_place_names:
-                # print(f"Error firing {transition.name}: Place {place_name} is not a declared output for this transition.")
-                return False # Abort firing
-
-
-        # All checks passed, proceed with token manipulation
-        # 1. Consume tokens
-        for place_name, tokens_to_consume in consumed_map.items():
-            place = self.places[place_name]
-            for token_to_consume in tokens_to_consume:
-                try:
-                    place.remove_token(token_to_consume)
-                except ValueError:
-                    # This should ideally not happen if validation above is thorough
-                    # and action function is well-behaved.
-                    # print(f"Critical error: Failed to remove {token_to_consume} from {place_name} during firing of {transition.name}.")
-                    # This might indicate a need for rollback or more complex state management.
-                    # For now, we'll log and potentially leave the net in an inconsistent state.
-                    # Re-add already removed tokens if possible? (complex)
-                    return False # Abort, but state might be partially changed.
-
-        # 2. Produce tokens
-        for place_name, tokens_to_produce in produced_map.items():
-            place = self.places[place_name]
-            for token_to_produce in tokens_to_produce:
-                place.add_token(token_to_produce)
-
-        # print(f"Transition {transition.name} fired successfully.")
-        return True
-
-    def run(self, max_steps: Optional[int] = None) -> int:
-        """
-        Runs the Petri Net simulation by repeatedly firing enabled transitions.
-        Stops when no transitions are enabled (quiescent state) or
-        max_steps are reached.
-        Returns the number of steps (firings) executed.
-        """
-        steps = 0
-        while True:
-            enabled_transitions = self.get_enabled_transitions()
-            if not enabled_transitions:
-                # print("No more enabled transitions. Simulation finished.")
-                break
-
-            # Simple strategy: fire the first enabled transition.
-            # More complex strategies could be implemented (e.g., random choice, priority).
-            transition_to_fire = enabled_transitions[0]
-
-            fired = self.fire_transition(transition_to_fire.name)
-
-            if fired:
-                steps += 1
-            else:
-                # print(f"Failed to fire {transition_to_fire.name}, though it was reported as enabled. This might indicate an issue.")
-                # Attempting to fire another enabled transition if available, or break.
-                # For simplicity, if one fails (which shouldn't happen if is_enabled is consistent with fire conditions), we break.
-                break
-
-
-            if max_steps is not None and steps >= max_steps:
-                # print(f"Reached maximum steps ({max_steps}). Simulation stopping.")
-                break
-
-        # print(f"Simulation ran for {steps} steps.")
-        return steps
+    # Removed: _get_input_token_map_for_transition, get_enabled_transitions, fire_transition, run
+    # These were part of the old execution model.
 
     def get_marking(self) -> Dict[str, List[Any]]:
-        """Returns the current marking of the Petri net (tokens in each place)."""
+        """Returns the current marking of the Petri net (PYTHON token values in each place)."""
         return {name: [token.value for token in place.tokens] for name, place in self.places.items()}
+
+    def to_specification(self) -> SpecPetriNet:
+        spec_places = [p.to_spec_place() for p in self.places.values()]
+
+        # Pass all_places to allow transitions to look up place details if needed
+        # (though current to_spec_transition doesn't use it)
+        spec_transitions = [t.to_spec_transition() for t in self.transitions.values()]
+
+        initial_marking_spec: SpecInitialMarking = {}
+        for place_name, place_obj in self.places.items():
+            if place_obj.tokens:
+                # Storing the direct value of the token, which should be JSON-serializable
+                initial_marking_spec[place_name] = [token.value for token in place_obj.tokens]
+
+        # Ensure initial_marking is None if empty, for cleaner JSON
+        final_initial_marking = initial_marking_spec if initial_marking_spec else None
+
+        return SpecPetriNet(
+            name=self.name,
+            places=spec_places,
+            transitions=spec_transitions,
+            initial_marking=final_initial_marking
+        )
