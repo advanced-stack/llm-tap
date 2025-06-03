@@ -1,146 +1,127 @@
-# LLM Trigger-Action Programs
+# LLM TAP (Trigger-Action Programs)
 
-`llm-tap` is a lightweight and extensible library for building Trigger-Action programs with Large Language Models (LLMs).
+`llm-tap` is a lightweight and extensible library to generate workflows using Large Language Models (LLMs). `llm-tap` provides mechanisms and data structures to generate workflows and constraints for any existing workflow engine.
+
+`llm-tap` is *not* a workflow library but a workflow generator.
 
 ## Quickstart
 
 Let's take an example to generate a workflow based on the following user query:
 
-"When the electricity price is below $0.4/ kWh and my Tesla is plugged, turn on charging."
+> *When the electricity price is below $0.4/ kWh and my Tesla is plugged, turn on charging.*
 
-### OpenAI
+To generate a workflow, `llm-tap` uses Colored Petri Nets to describe the different components.
+
 
 ```python
-import os
 from llm_tap import llm
-from llm_tap.models import Workflow
+from llm_tap.models import (
+    Workflow,
+    Place,
+    TokenType,
+    instructions,
+    register_place,
+    register_token_type,
+    get_places,
+)
 
-system_prompt = """You are an automation assistant.
+remaining_range = TokenType(name="remaining_range", type="INT")
+charger_enabled = TokenType(name="charger_enabled", type="BOOL")
+car_plugged = TokenType(name="car_plugged", type="BOOL")
+electricity_price = TokenType(name="electricity_price", type="FLOAT")
 
-- Design a workflow to answer user's query for an automation.
-- Be sure to consider all branches when evaluating conditionals.
-- Ensure safe defaults.
 
-"""
-prompt = "When the electricity price is below $0.4/ kWh and my Tesla is plugged, turn on charging."
+register_token_type(remaining_range)
+register_token_type(charger_enabled)
+register_token_type(car_plugged)
+register_token_type(electricity_price)
 
-with llm.HTTP(
-    base_url="https://api.openai.com/v1/chat/completions",
-    api_key=os.getenv('OPENAI_API_KEY'),
-    model="gpt-4.1-nano",
-) as parser:
-    workflow = parser.parse(data_class=Workflow, prompt=prompt, system_prompt=system_prompt)
+register_place(
+    Place(
+        name="Power company",
+        description="Provides current electricity price",
+        type="source",
+        token_type=electricity_price,
+    )
+)
+
+register_place(
+    Place(
+        name="Power charger (plug sensor)",
+        description="Provides the status of the plug",
+        type="source",
+        token_type=car_plugged,
+    )
+)
+
+register_place(
+    Place(
+        name="Power charger",
+        description="Charge electric vehicles",
+        type="sink",
+        token_type=charger_enabled,
+    )
+)
+
+register_place(
+    Place(
+        name="EV monitoring system (range)",
+        description="Provides the remaining range in miles",
+        type="source",
+        token_type=remaining_range,
+    )
+)
+
+system_prompt = instructions
+prompt = """When the electricity price is below $0.4/kWh and my Tesla
+is plugged, turn on charging."""
+
+model = "~/.cache/py-llm-core/models/llama-3.1-8b"
+
+with llm.LLamaCPP(model=model, n_ctx=8_000) as parser:
+    workflow = parser.parse(
+        data_class=Workflow,
+        prompt=prompt,
+        system_prompt=system_prompt,
+    )
     print(workflow)
 ```
 
-----
 
-When called, this displays:
+
+This prints the following result:
+
 ```python
-Workflow(
-    name="Electricity Price and Tesla Charging Workflow",
-    description="Automates Tesla charging based on electricity prices.",
-    triggers=[Trigger(description="Electricity price updates")],
-    nodes=[
-        Node(
-            name="Check Electricity Price and Tesla Plug Status",
-            condition_sets=[
-                ConditionSet(
-                    conditions=[
-                        Condition(
-                            description="Electricity price is below $0.4/kWh"
-                        )
-                    ],
-                    operator="AND",
-                ),
-                ConditionSet(
-                    conditions=[Condition(description="Tesla is plugged in")],
-                    operator="AND",
-                ),
-            ],
-            branches=[
-                Branch(
-                    conditions_value=True,
-                    actions=[Action(description="Turn on Tesla charging")],
-                ),
-                Branch(
-                    conditions_value=False,
-                    actions=[Action(description="Do nothing")],
-                ),
-            ],
-        )
-    ],
-)
 
 ```
 
-### GGUF Open weights models with llama.cpp
+Then we can generate a mermaid graph:
 
 ```python
-import os
-from llm_tap import llm
-from llm_tap.models import Workflow
+from llm_tap.to_mermaid import workflow_to_mermaid
 
-system_prompt = """You are an automation assistant.
-
-- Design a workflow to answer user's query for an automation.
-- Be sure to consider all branches when evaluating conditionals.
-- Ensure safe defaults.
-
-"""
-prompt = "When the electricity price is below $0.4/ kWh and my Tesla is plugged, turn on charging."
-
-
-#: model should be the path to a GGUF model
-model="~/.cache/py-llm-core/models/qwen2.5-1.5b"
-# model="~/.cache/py-llm-core/models/llama-3.2-3b"
-# model="~/.cache/py-llm-core/models/llama-3.1-8b"
-# model="~/.cache/py-llm-core/models/qwen3-4b"
-# model="~/.cache/py-llm-core/models/mistral-7b"
-
-with llm.LLamaCPP(model=model) as parser:
-    workflow = parser.parse(data_class=Workflow, prompt=prompt)
-    print(workflow)
+print(workflow_to_mermaid)
 ```
 
-----
-
-When called, this displays:
-```python
-Workflow(
-    name="Turn on charging",
-    description="Turn on charging when the electricity price is below $0.4/ kWh and my Tesla is plugged.",
-    triggers=[
-        Trigger(
-            description="Electricity price is below $0.4/ kWh and my Tesla is plugged."
-        )
-    ],
-    nodes=[
-        Node(
-            name="Turn on charging",
-            condition_sets=[
-                ConditionSet(
-                    conditions=[
-                        Condition(
-                            description="Electricity price is below $0.4/ kWh"
-                        ),
-                        Condition(description="My Tesla is plugged"),
-                    ],
-                    operator="AND",
-                )
-            ],
-            branches=[
-                Branch(
-                    conditions_value=True,
-                    actions=[Action(description="Turn on charging")],
-                )
-            ],
-        )
-    ],
-)
-
+```plain
+flowchart LR
+    subgraph Sources
+        Power_charger__plug_sensor_[Power_charger_#40;plug_sensor#41;<br/>car_plugged: BOOL]
+        Power_company[Power_company<br/>electricity_price: FLOAT]
+    end
+    subgraph Sink
+        Power_charger[Power_charger<br/>charger_enabled: BOOL]
+    end
+    subgraph Transitions
+        Turn_on_charging[Turn on charging<br/>electricity_price LESS THAN 0.4 AND car_plugged EQUAL True]
+    end
+    Power_company -->|electricity_price| Turn_on_charging
+    Power_charger__plug_sensor_ -->|car_plugged| Turn_on_charging
+    Turn_on_charging -->|charger_enabled = True| Power_charger
 ```
 
-## Documentation - Tutorial
+[![](https://mermaid.ink/img/pako:eNp1U1Fv2jAQ_ivW9TVlIZhi3K0SWzvtISvbYC8jU2SSa7Ca2JHjqGPAf5-TtBOB1i_n-87fd5_P8g4SnSJweMj1U7IRxpLwR6SIW1W9zowoN2Sha5Ng1aHN-qaf0MTN6czFuMzrLK5QVdrEq37tgvrXR-ULOrx-vzbvbhJhWlqGKScf5_Pw95m6Lkqhtqte1nIxx8QamUi7jUsXkZPP4Xy2fJZAlZ76l-rxDfN9u521Z-uoxDo_sXeuvTRCVdJKrY7ms6yNirXqZKXKVg1AtCIvwOv3IOHdYkGWX2b3xB9QMru_JUdzInfff85C17DGUze9GZHLy5v9mfb-zFSP-tpTtkJHBt6SOEU7Xn-K5ENrfN_vFynwIDMyBW5d1YMCTSGaFHaNdgR2gwVGwN02FeYxgkgdHMfd85fWxQvN6DrbAH8QeeWyukyFxVsp3AsV_1HjpoXmk66VBR6MJq0I8B38AT72B2zqB4z5k_GUBSygHmyBT8eDgI2GE8Yo9a_80dXBg79tW3fe5eMgoHREAzZlQw8wlVabr91vaj_V4R-KQCHw?type=png)](https://mermaid.live/edit#pako:eNp1U1Fv2jAQ_ivW9TVlIZhi3K0SWzvtISvbYC8jU2SSa7Ca2JHjqGPAf5-TtBOB1i_n-87fd5_P8g4SnSJweMj1U7IRxpLwR6SIW1W9zowoN2Sha5Ng1aHN-qaf0MTN6czFuMzrLK5QVdrEq37tgvrXR-ULOrx-vzbvbhJhWlqGKScf5_Pw95m6Lkqhtqte1nIxx8QamUi7jUsXkZPP4Xy2fJZAlZ76l-rxDfN9u521Z-uoxDo_sXeuvTRCVdJKrY7ms6yNirXqZKXKVg1AtCIvwOv3IOHdYkGWX2b3xB9QMru_JUdzInfff85C17DGUze9GZHLy5v9mfb-zFSP-tpTtkJHBt6SOEU7Xn-K5ENrfN_vFynwIDMyBW5d1YMCTSGaFHaNdgR2gwVGwN02FeYxgkgdHMfd85fWxQvN6DrbAH8QeeWyukyFxVsp3AsV_1HjpoXmk66VBR6MJq0I8B38AT72B2zqB4z5k_GUBSygHmyBT8eDgI2GE8Yo9a_80dXBg79tW3fe5eMgoHREAzZlQw8wlVabr91vaj_V4R-KQCHw)
+
+## Additional resources
 
 Currently work in progress here: https://advanced-stack.com/resources/how-to-build-workflows-trigger-action-program-with-llms.html

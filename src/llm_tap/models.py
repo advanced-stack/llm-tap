@@ -57,19 +57,19 @@ supported_operands = (
 )
 
 
-@dataclass
+@dataclass(frozen=True)
 class TokenType:
     name: str
     type: str = field(metadata={"choices": supported_types})
 
 
-@dataclass
+@dataclass(frozen=True)
 class TokenValue:
     type: TokenType
     value: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Place:
     name: str
     description: str
@@ -77,34 +77,34 @@ class Place:
     token_type: TokenType
 
 
-@dataclass
+@dataclass(frozen=True)
 class InputArc:
     place: Place = field(metadata={"choices": get_places})
     token_name: str = field(metadata={"choices": get_token_names})
     transition: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class OutputArc:
     place: Place = field(metadata={"choices": get_places})
     produce_token: TokenValue
     transition: str
 
 
-@dataclass
+@dataclass(frozen=True)
 class Condition:
     operator: str = field(metadata={"choices": supported_operands})
     value: TokenValue
 
 
-@dataclass
+@dataclass(frozen=True)
 class Guard:
     name: str
     conditions: list[Condition]
     conditions_operator: str = field(metadata={"choices": conditions_op})
 
 
-@dataclass
+@dataclass(frozen=True)
 class Transition:
     name: str
     state_change: str
@@ -113,7 +113,7 @@ class Transition:
     guard: list[Guard]
 
 
-@dataclass
+@dataclass(frozen=True)
 class Workflow:
     name: str
     query: str
