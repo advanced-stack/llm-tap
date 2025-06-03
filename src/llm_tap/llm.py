@@ -409,6 +409,22 @@ class HTTP:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
+    def generate(self, prompt="", system_prompt="You are a helpful assistant"):
+        payload = prepare(None, prompt, system_prompt)
+        response = self.session.post(self.base_url, json=payload)
+
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            if response.status_code == 429:
+                time.sleep(10)
+                return self.generate(prompt, system_prompt)
+            print(response.json())
+            raise e
+        attributes = response.json()
+
+        return parse_response(attributes)
+
     def parse(self, data_class, prompt="", system_prompt="Answer in JSON"):
         payload = prepare(data_class, prompt, system_prompt, self.model)
         response = self.session.post(self.base_url, json=payload)

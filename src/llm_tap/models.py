@@ -93,13 +93,13 @@ class OutputArc:
 
 @dataclass
 class Condition:
-    name: str
     operator: str = field(metadata={"choices": supported_operands})
     value: TokenValue
 
 
 @dataclass
 class Guard:
+    name: str
     conditions: list[Condition]
     conditions_operator: str = field(metadata={"choices": conditions_op})
 
@@ -196,9 +196,6 @@ end transition
 ```
 
 # Attach Arcs and Guards
-
-- An arc is connected to exactly one transition and one place.
-- A Guard is a condition
 
 For each transition:
 
