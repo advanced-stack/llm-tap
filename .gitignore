@@ -177,3 +177,6 @@ cython_debug/
 bin
 venv
 activate
+examples
+
+.DS_Store

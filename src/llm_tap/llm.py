@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 import time
 import os
+import copy
 import typing
 import types
 import json
+import logging
 
 from functools import lru_cache
 from inspect import isclass
@@ -13,6 +15,7 @@ from textwrap import dedent
 from dataclasses import (
     make_dataclass,
     dataclass,
+    asdict,
     fields,
     is_dataclass,
     MISSING,
@@ -24,11 +27,28 @@ from contextlib import redirect_stdout, redirect_stderr
 
 
 class_names_mapping = {}
+logger = logging.getLogger(__name__)
+
+
+def serialize(obj):
+    if isinstance(obj, Enum):
+        return obj.value
+    elif isinstance(obj, list):
+        return [serialize(i) for i in obj]
+    elif isinstance(obj, tuple):
+        return [serialize(i) for i in obj]
+    elif isinstance(obj, dict):
+        return {k: serialize(v) for k, v in obj.items()}
+    elif is_dataclass(obj):
+        return serialize(asdict(obj))
+    else:
+        return obj
 
 
 @lru_cache
-def convert_field(cls, field_type):
+def convert_field(cls, field):
     class_name = cls.__name__
+    field_type = field.type
 
     mapping = {
         int: {"type": "integer"},
@@ -38,6 +58,32 @@ def convert_field(cls, field_type):
         complex: {"type": "string", "format": "complex-number"},
         bytes: {"type": "string", "contentEncoding": "base64"},
     }
+
+    if field_type is type and callable in field.metadata:
+        caller_fn = field.metadata.get(callable)
+
+        if caller_fn is None:
+            raise ValueError("No callable defined.")
+
+        actual_type = caller_fn()
+
+        if isinstance(actual_type, (list, tuple)):
+            actual_type = actual_type[0]
+
+        new_field = copy.copy(field)
+        object.__setattr__(new_field, "type", actual_type)
+        return convert_field(cls, new_field)
+
+    elif "choices" in field.metadata:
+        choices = field.metadata["choices"]
+
+        if callable(choices):
+            choices = choices()
+
+        return {
+            "oneOf": [to_const_json_schema(c) for c in choices],
+            "description": f"One of: {choices}",
+        }
 
     if field_type in mapping:
         return mapping[field_type]
@@ -64,7 +110,7 @@ def convert_field(cls, field_type):
                 for _cls in available_types
             ]
 
-            return {"anyOf": [convert_field(cls, t) for t in augmented_types]}
+            return {"anyOf": [to_json_schema(t) for t in augmented_types]}
 
         elif isinstance(field_type, types.GenericAlias):
             container_type = field_type.__origin__
@@ -77,7 +123,10 @@ def convert_field(cls, field_type):
 
             items_type = items_type[0]
 
-            items = convert_field(cls, items_type)
+            if is_dataclass(items_type):
+                items = to_json_schema(items_type)
+            else:
+                items = convert_field(cls, items_type)
 
             container_mapping = {
                 list: {"type": "array", "items": items},
@@ -110,6 +159,43 @@ def convert_field(cls, field_type):
             }
 
 
+def to_const_json_schema(instance):
+    """
+    Recursively turns a dataclass instance into a JSON Schema dict with all attributes as const.
+    """
+    if is_dataclass(instance):
+        class_names_mapping[instance.__class__.__name__] = instance.__class__
+        properties = {"_type": {"const": type(instance).__name__}}
+        required = ["_type"]
+        for field in fields(instance):
+            value = getattr(instance, field.name)
+            properties[field.name] = to_const_json_schema(value)
+            required.append(field.name)
+        return {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        }
+    elif isinstance(instance, Enum):
+        return {"const": instance.value}
+    elif isinstance(instance, list):
+        return {
+            "type": "array",
+            "items": [to_const_json_schema(v) for v in instance],
+        }
+    elif isinstance(instance, dict):
+        # frozen dict: all keys/values as const
+        return {
+            "type": "object",
+            "properties": {
+                k: to_const_json_schema(v) for k, v in instance.items()
+            },
+            "required": list(instance.keys()),
+        }
+    else:
+        return {"const": instance}
+
+
 @lru_cache
 def to_json_schema(data_class):
     properties = {}
@@ -118,7 +204,7 @@ def to_json_schema(data_class):
     class_names_mapping[data_class.__name__] = data_class
 
     for f in fields(data_class):
-        properties[f.name] = convert_field(data_class, f.type)
+        properties[f.name] = convert_field(data_class, f)
 
         no_default = f.default == MISSING
         no_default_factory = f.default_factory == MISSING
@@ -130,13 +216,15 @@ def to_json_schema(data_class):
     data_class_name = data_class.__name__
     data_class_docstring = dedent(data_class.__doc__).strip()
 
-    return {
+    schema = {
         "type": "object",
         "title": data_class_name,
         "description": data_class_docstring,
         "properties": properties,
         "required": required_fields,
     }
+    logger.debug(f"{data_class.__name__} => {schema}")
+    return schema
 
 
 def from_dict(cls, attrs):
@@ -150,6 +238,14 @@ def from_dict(cls, attrs):
         cls = class_names_mapping.get(cls)
         if cls is None:
             raise ValueError(f"Unknown class name: {cls}")
+
+    if isinstance(attrs, dict) and "_type" in attrs:
+        logger.debug(f"Hydrating {attrs}...")
+        type_ = attrs["_type"]
+        concrete_cls = class_names_mapping[type_]
+        attrs = dict(attrs)
+        del attrs["_type"]
+        return from_dict(concrete_cls, attrs)
 
     if is_dataclass(cls):
         field_types = {f.name: f.type for f in fields(cls)}
@@ -236,14 +332,7 @@ def make_helper(data_class):
 
 
 @lru_cache
-def prepare(data_class, prompt, system_prompt, model=None):
-    data_class_schema = to_json_schema(data_class)
-    data_class_tool = as_tool(data_class_schema)
-    data_class_tool_choice = as_tool_choice(data_class_schema)
-    data_class_helper = make_helper(data_class)
-
-    user_prompt = "\n\n".join((data_class_helper, prompt))
-
+def prepare(data_class=None, prompt="", system_prompt="", model=None):
     payload = {
         "messages": [
             {
@@ -252,14 +341,26 @@ def prepare(data_class, prompt, system_prompt, model=None):
             },
             {
                 "role": "user",
-                "content": user_prompt,
+                "content": prompt,
             },
         ],
-        "tools": [data_class_tool],
-        "tool_choice": data_class_tool_choice,
-        "parallel_tool_calls": False,
         "temperature": 0.0,
     }
+
+    if data_class is not None:
+        data_class_schema = to_json_schema(data_class)
+        data_class_tool = as_tool(data_class_schema)
+        data_class_tool_choice = as_tool_choice(data_class_schema)
+        data_class_helper = make_helper(data_class)
+        prompt = "\n\n".join((data_class_helper, prompt))
+
+        payload.update(
+            {
+                "tools": [data_class_tool],
+                "tool_choice": data_class_tool_choice,
+                "parallel_tool_calls": False,
+            }
+        )
 
     if model is not None:
         payload.update({"model": model})
@@ -267,12 +368,20 @@ def prepare(data_class, prompt, system_prompt, model=None):
     return payload
 
 
-def parse_response(data_class, attributes):
-    tool_call = attributes["choices"][0]["message"]["tool_calls"][0]
-    arguments_json = tool_call["function"]["arguments"]
-    arguments_dict = json.loads(arguments_json)
-    instance = from_dict(data_class, arguments_dict)
-    return instance
+def parse_response(attributes, data_class=None):
+    logger.debug(f"LLM response: {attributes}")
+
+    msg = attributes["choices"][0]["message"]
+
+    if data_class and "tool_calls" in msg:
+        tool_call = msg["tool_calls"][0]
+        arguments_json = tool_call["function"]["arguments"]
+        arguments_dict = json.loads(arguments_json)
+
+        instance = from_dict(data_class, arguments_dict)
+        return instance
+
+    return msg["content"]
 
 
 @dataclass
@@ -300,6 +409,22 @@ class HTTP:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
+    def generate(self, prompt="", system_prompt="You are a helpful assistant"):
+        payload = prepare(None, prompt, system_prompt)
+        response = self.session.post(self.base_url, json=payload)
+
+        try:
+            response.raise_for_status()
+        except Exception as e:
+            if response.status_code == 429:
+                time.sleep(10)
+                return self.generate(prompt, system_prompt)
+            print(response.json())
+            raise e
+        attributes = response.json()
+
+        return parse_response(attributes)
+
     def parse(self, data_class, prompt="", system_prompt="Answer in JSON"):
         payload = prepare(data_class, prompt, system_prompt, self.model)
         response = self.session.post(self.base_url, json=payload)
@@ -309,9 +434,10 @@ class HTTP:
             if response.status_code == 429:
                 time.sleep(10)
                 return self.parse(data_class, prompt)
+            print(response.json())
             raise e
         attributes = response.json()
-        return parse_response(data_class, attributes)
+        return parse_response(attributes, data_class)
 
 
 @dataclass
@@ -326,7 +452,7 @@ class LLamaCPP:
     n_threads: int = 1
 
     def __post_init__(self):
-        pass
+        self.model_path = os.path.expanduser(self.model)
 
     def __enter__(self):
         return self
@@ -334,14 +460,32 @@ class LLamaCPP:
     def __exit__(self, exc_type, exc_val, exc_tb):
         pass
 
+    def generate(self, prompt="", system_prompt="You are a helpful assistant"):
+        payload = prepare(None, prompt, system_prompt)
+
+        with open(os.devnull, "w") as fnull:
+            with redirect_stdout(fnull), redirect_stderr(fnull):
+                self._llm = llama_cpp.Llama(
+                    self.model_path,
+                    n_ctx=self.n_ctx,
+                    n_gpu_layers=self.n_gpu_layers,
+                    n_threads=self.n_threads,
+                    verbose=False,
+                )
+
+                response = self._llm.create_chat_completion(
+                    messages=payload["messages"],
+                )
+                del self._llm
+        return parse_response(response)
+
     def parse(self, data_class, prompt="", system_prompt="Answer in JSON"):
-        model_path = os.path.expanduser(self.model)
         payload = prepare(data_class, prompt, system_prompt)
 
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 self._llm = llama_cpp.Llama(
-                    model_path,
+                    self.model_path,
                     n_ctx=self.n_ctx,
                     n_gpu_layers=self.n_gpu_layers,
                     n_threads=self.n_threads,
@@ -355,4 +499,4 @@ class LLamaCPP:
                     tool_choice=payload["tool_choice"],
                 )
                 del self._llm
-        return parse_response(data_class, response)
+        return parse_response(response, data_class)
