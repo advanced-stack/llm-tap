@@ -92,6 +92,83 @@ with llm.LLamaCPP(model=model, n_ctx=8_000) as parser:
 This prints the following result:
 
 ```python
+Workflow(
+    name="Workflow",
+    query="When the electricity price is below $0.4/kWh and my Tesla is plugged, turn on charging.",
+    transitions=[
+        Transition(
+            name="Turn on charging",
+            state_change="Change",
+            inputs=[
+                InputArc(
+                    place=Place(
+                        name="Power company",
+                        description="Provides current electricity price",
+                        type="source",
+                        token_type=TokenType(
+                            name="electricity_price", type="FLOAT"
+                        ),
+                    ),
+                    token_name="electricity_price",
+                    transition="Turn on charging",
+                ),
+                InputArc(
+                    place=Place(
+                        name="Power charger (plug sensor)",
+                        description="Provides the status of the plug",
+                        type="source",
+                        token_type=TokenType(name="car_plugged", type="BOOL"),
+                    ),
+                    token_name="car_plugged",
+                    transition="Turn on charging",
+                ),
+            ],
+            outputs=[
+                OutputArc(
+                    place=Place(
+                        name="Power charger",
+                        description="Charge electric vehicles",
+                        type="sink",
+                        token_type=TokenType(
+                            name="charger_enabled", type="BOOL"
+                        ),
+                    ),
+                    produce_token=TokenValue(
+                        type=TokenType(name="charger_enabled", type="BOOL"),
+                        value="True",
+                    ),
+                    transition="Turn on charging",
+                )
+            ],
+            guard=[
+                Guard(
+                    name="Turn on charging",
+                    conditions=[
+                        Condition(
+                            operator="LESS THAN",
+                            value=TokenValue(
+                                type=TokenType(
+                                    name="electricity_price", type="FLOAT"
+                                ),
+                                value="0.4",
+                            ),
+                        ),
+                        Condition(
+                            operator="EQUAL",
+                            value=TokenValue(
+                                type=TokenType(
+                                    name="car_plugged", type="BOOL"
+                                ),
+                                value="True",
+                            ),
+                        ),
+                    ],
+                    conditions_operator="AND",
+                )
+            ],
+        )
+    ],
+)
 
 ```
 
