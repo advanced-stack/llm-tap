@@ -165,8 +165,8 @@ def to_const_json_schema(instance):
     """
     if is_dataclass(instance):
         class_names_mapping[instance.__class__.__name__] = instance.__class__
-        properties = {"__type__": {"const": type(instance).__name__}}
-        required = ["__type__"]
+        properties = {"_type": {"const": type(instance).__name__}}
+        required = ["_type"]
         for field in fields(instance):
             value = getattr(instance, field.name)
             properties[field.name] = to_const_json_schema(value)
@@ -239,13 +239,12 @@ def from_dict(cls, attrs):
         if cls is None:
             raise ValueError(f"Unknown class name: {cls}")
 
-    #: Todo: recursively hydrate values
-    if isinstance(attrs, dict) and "__type__" in attrs:
+    if isinstance(attrs, dict) and "_type" in attrs:
         logger.debug(f"Hydrating {attrs}...")
-        type_ = attrs["__type__"]
+        type_ = attrs["_type"]
         concrete_cls = class_names_mapping[type_]
         attrs = dict(attrs)
-        del attrs["__type__"]
+        del attrs["_type"]
         return from_dict(concrete_cls, attrs)
 
     if is_dataclass(cls):
@@ -345,6 +344,7 @@ def prepare(data_class=None, prompt="", system_prompt="", model=None):
                 "content": prompt,
             },
         ],
+        "temperature": 0.0,
     }
 
     if data_class is not None:
@@ -359,7 +359,6 @@ def prepare(data_class=None, prompt="", system_prompt="", model=None):
                 "tools": [data_class_tool],
                 "tool_choice": data_class_tool_choice,
                 "parallel_tool_calls": False,
-                "temperature": 0.0,
             }
         )
 
