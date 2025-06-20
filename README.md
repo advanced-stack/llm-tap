@@ -234,6 +234,17 @@ The `models.py` module is central to `llm-tap` as it defines the data structures
 
 ### Using Local Models with `LLamaCPP`
 
+#### Important note
+
+Please note that the library `llama-cpp-python` required for using the `LLamaCPP` adapter should include the ranking feature, which is currently not available upstream. To ensure you have the correct version, install the package from the following repository and branch:
+
+```
+https://github.com/advanced-stack/llama-cpp-python.git
+Branch: feature/ranking
+
+>> pip install git+https://github.com/advanced-stack/llama-cpp-python.git@feature/ranking
+```
+
 The `LLamaCPP` adapter (located in `llm.py`) allows you to use GGUF-based language models locally. It leverages the `llama_cpp` Python bindings for efficient execution on CPU and/or GPU.
 
 #### Constructor Parameters:
