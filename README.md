@@ -4,6 +4,33 @@
 
 `llm-tap` is *not* a workflow library but should be used to design a workflow generator with LLMs.
 
+## Installation
+
+Installation shall be done from source to build a local package. This requirement is tied to a customized version of `llama-cpp-python`.
+
+```
+https://github.com/advanced-stack/llama-cpp-python.git
+Branch: feature/ranking
+```
+
+To build a package:
+
+```
+git clone https://github.com/advanced-stack/llm-tap.git
+
+cd llm-tap
+make setup
+make build  # build a redistribuable package for llm-tap in ./dist/
+```
+
+
+Then you can pip install in your project:
+
+```
+pip install /path/to/llm-tap/dist/llm_tap-0.2.0.tar.gz
+```
+
+
 ## Quickstart
 
 Let's take an example to generate a workflow based on the following user query:
@@ -233,17 +260,6 @@ The `models.py` module is central to `llm-tap` as it defines the data structures
 `llm-tap` uses adapters to interact with different LLMs. These adapters handle the specifics of model loading, text generation, parsing, and other LLM-related tasks.
 
 ### Using Local Models with `LLamaCPP`
-
-#### Important note
-
-Please note that the library `llama-cpp-python` required for using the `LLamaCPP` adapter should include the ranking feature, which is currently not available upstream. To ensure you have the correct version, install the package from the following repository and branch:
-
-```
-https://github.com/advanced-stack/llama-cpp-python.git
-Branch: feature/ranking
-
->> pip install git+https://github.com/advanced-stack/llama-cpp-python.git@feature/ranking
-```
 
 The `LLamaCPP` adapter (located in `llm.py`) allows you to use GGUF-based language models locally. It leverages the `llama_cpp` Python bindings for efficient execution on CPU and/or GPU.
 
