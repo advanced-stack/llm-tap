@@ -153,59 +153,6 @@ flowchart LR
 ![](./assets/diagram.png)
 
 
-## Core Concepts: `models.py`
-
-The `models.py` module is central to `llm-tap` as it defines the data structures for representing Colored Petri Nets. These structures are used by the LLM to generate workflows.
-
-### Main Dataclasses:
-
-*   **`TokenType`**: Represents the type of a token, e.g., `INT`, `BOOL`, `FLOAT`, `STRING`.
-*   **`TokenValue`**: Represents a specific value of a token, including its type and actual value.
-*   **`Place`**: Represents a location in the Petri Net that can hold tokens. It has a name, description, type (source or sink), and an associated `TokenType`.
-*   **`InputArc`**: Defines an arc from a `Place` to a `Transition`, specifying which token is consumed.
-*   **`OutputArc`**: Defines an arc from a `Transition` to a `Place`, specifying which token is produced.
-*   **`Condition`**: Represents a condition that must be met for a `Guard` to be satisfied. It involves an operator (e.g., `LESS THAN`, `EQUAL`) and a `TokenValue`.
-*   **`Guard`**: A set of `Condition`s that control whether a `Transition` can fire. It includes an operator (`AND`, `OR`) to combine multiple conditions.
-*   **`Transition`**: Represents an action or event in the workflow. It consumes tokens from input places (via `InputArc`s), is controlled by a `Guard`, and produces tokens to output places (via `OutputArc`s).
-*   **`Workflow`**: The top-level dataclass representing the entire Petri Net. It includes the user's query and a list of `Transition`s.
-
-### Utility Functions:
-
-*   **`register_token_type(token_type)`**: Registers a new `TokenType` making it available for use in the workflow.
-*   **`get_token_names()`**: Returns a list of names of all registered `TokenType`s.
-*   **`register_place(place)`**: Registers a new `Place` making it available for use in the workflow.
-*   **`get_places(*filters)`**: Retrieves a list of all registered `Place`s. Optionally, one or more filter functions can be provided to narrow down the results (e.g., `is_source`, `is_sink`).
-*   **`is_source(place)`**: A filter function used with `get_places` to retrieve only places of type "source".
-*   **`is_sink(place)`**: A filter function used with `get_places` to retrieve only places of type "sink".
-*   **`places_str(*filters)`**: Returns a list of string representations of registered `Place`s, optionally filtered.
-
-## LLM Adapters
-
-`llm-tap` uses adapters to interact with different LLMs. These adapters handle the specifics of model loading, text generation, parsing, and other LLM-related tasks.
-
-### Using Local Models with `LLamaCPP`
-
-The `LLamaCPP` adapter (located in `llm.py`) allows you to use GGUF-based language models locally. It leverages the `llama_cpp` Python bindings for efficient execution on CPU and/or GPU.
-
-#### Constructor Parameters:
-
-*   **`model`** (str): Path to the GGUF-formatted language model file. This is the primary model used for generation and parsing.
-*   **`embedding_model`** (str, optional): Path to a GGUF-formatted embedding model. Used by the `generate_embeddings` method.
-*   **`reranker_model`** (str, optional): Path to a GGUF-formatted reranker model. Used by the `rank` method.
-*   **`n_ctx`** (int, optional): The context size (in tokens) for the model. Defaults to a value appropriate for most models.
-*   **`n_gpu_layers`** (int, optional): The number of model layers to offload to the GPU. Setting this to a positive value can significantly speed up inference if a compatible GPU is available. `0` means CPU only. `-1` means offload all possible layers.
-*   **`n_threads`** (int, optional): The number of CPU threads to use for generation. Defaults to the number of physical CPU cores.
-
-#### Main Methods:
-
-*   **`generate(prompt: str, system_prompt: str = None) -> str`**:
-    Generates text based on the provided `prompt`. An optional `system_prompt` can be used to guide the model's behavior. Returns the generated text as a string.
-*   **`parse(data_class, prompt: str, system_prompt: str = None)`**:
-    Generates text based on the `prompt` and then attempts to parse this text into an instance of the provided `data_class`. This is useful for structured data extraction. An optional `system_prompt` can guide generation. Returns an instance of `data_class`.
-*   **`generate_embeddings(text: str) -> list[float]`**:
-    Generates embedding vectors for the input `text` using the specified `embedding_model`. Returns a list of floats representing the embedding.
-*   **`rank(query: str, docs: list[str]) -> list[float]`**:
-    Ranks a list of `docs` based on their relevance to a given `query`, using the `reranker_model`. Returns a list of scores (floats) corresponding to each document.
 
 ## Additional resources
 
