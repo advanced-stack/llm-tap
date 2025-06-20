@@ -7,7 +7,6 @@ import types
 import json
 import logging
 
-from functools import lru_cache
 from inspect import isclass
 from enum import Enum, StrEnum
 from textwrap import dedent
@@ -45,7 +44,6 @@ def serialize(obj):
         return obj
 
 
-@lru_cache
 def convert_field(cls, field):
     class_name = cls.__name__
     if getattr(field, "type", None):
@@ -85,7 +83,7 @@ def convert_field(cls, field):
 
         return {
             "oneOf": [to_const_json_schema(c) for c in choices],
-            "description": f"One of: {choices}",
+            "description": f"One of: {', '.join(choices)}",
         }
 
     if field_type in mapping:
@@ -210,7 +208,6 @@ def to_const_json_schema(instance):
         return {"const": instance}
 
 
-@lru_cache
 def to_json_schema(data_class):
     properties = {}
     required_fields = []
@@ -317,7 +314,6 @@ def as_tool_choice(json_schema):
     return {"type": "function", "function": {"name": json_schema["title"]}}
 
 
-@lru_cache
 def make_helper(data_class):
     class_name = f"name: {data_class.__name__}"
     class_description = f"description: {dedent(data_class.__doc__.strip())}"
@@ -345,7 +341,6 @@ def make_helper(data_class):
     return helper_description
 
 
-@lru_cache
 def prepare(data_class=None, prompt="", system_prompt="", model=None):
     payload = {
         "messages": [
@@ -485,7 +480,7 @@ class LLamaCPP:
 
         kwargs = {
             "model_path": path,
-            "embedding": embedding,
+            "embedding": embedding or reranking,
             "pooling_type": pooling_type,
             "n_ctx": self.n_ctx,
             "n_gpu_layers": self.n_gpu_layers,
