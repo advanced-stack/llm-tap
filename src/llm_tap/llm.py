@@ -490,7 +490,7 @@ class LLamaCPP:
             "n_ctx": self.n_ctx,
             "n_gpu_layers": self.n_gpu_layers,
             "n_threads": self.n_threads,
-            "verbose": self.verbose,
+            "verbose": False,
         }
 
         with open(os.devnull, "w") as fnull:
