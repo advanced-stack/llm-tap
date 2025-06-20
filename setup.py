@@ -10,9 +10,9 @@ requirements = (here / "requirements.txt").read_text().splitlines()
 
 setup(
     name="llm-tap",
-    version="0.1.0",
+    version="0.2.0",
     license="MIT",
-    description="lightweight library for building Trigger-Action programs with llm",
+    description="lightweight library for building Trigger-Action programs with LLMs",
     long_description=long_description,
     long_description_content_type="text/markdown",
     author="P.A. SCHEMBRI",
