@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-tap"
+version = "0.2.0"
+description = "Lightweight library for building Trigger-Action programs with LLMs"
+readme = "README.md"
+license = "MIT"
+authors = [
+ { name="P.A. SCHEMBRI", email="pa.schembri@advanced-stack.com" }
+]
+dependencies = [
+ "requests",
+ "llama-cpp-python @ git+https://github.com/advanced-stack/llama-cpp-python.git@feature/ranking"
+]
+urls = { "Homepage" = "https://github.com/advanced-stack/llm-tap" }
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["llm_tap"]
