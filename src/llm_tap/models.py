@@ -6,27 +6,47 @@ Defines the abstract models to describe Colored Petri Nets
 
 from dataclasses import dataclass, field
 
+SOURCE = "source"
+SINK = "sink"
 
 _place_registry = {}
-
-
-def register_place(place):
-    _place_registry[place.name] = place
-
-
-def get_places():
-    return tuple(_place_registry.values())
-
-
 _token_type_registry = {}
 
 
-def register_token_type(token_type):
-    _token_type_registry[token_type.name] = token_type
+def register_token_type(place, token_type):
+    key = (place.name, place.token_type.name)
+    _token_type_registry[key] = token_type
 
 
 def get_token_names():
-    return tuple(_token_type_registry.keys())
+    return tuple(t[1] for t in _token_type_registry.keys())
+
+
+def register_place(place):
+    key = (place.name, place.token_type.name)
+    register_token_type(place, place.token_type)
+
+    _place_registry[key] = place
+
+
+def get_places(*filters):
+    places = tuple(_place_registry.values())
+    if not filters:
+        return places
+    filtered_places = filter(lambda p: all(f(p) for f in filters), places)
+    return set(filtered_places)
+
+
+def is_source(place):
+    return place.type == SOURCE
+
+
+def is_sink(place):
+    return place.type == SINK
+
+
+def places_str(*filters):
+    return list(map(str, get_places(*filters)))
 
 
 supported_types = (
@@ -42,8 +62,8 @@ conditions_op = (
 )
 
 place_types = (
-    "source",
-    "sink",
+    SOURCE,
+    SINK,
 )
 
 supported_operands = (
@@ -76,17 +96,19 @@ class Place:
     type: str = field(metadata={"choices": place_types})
     token_type: TokenType
 
+    def __str__(self):
+        return f"{self.type}: {self.name} [{self.token_type.name}]"
+
 
 @dataclass(frozen=True)
 class InputArc:
-    place: Place = field(metadata={"choices": get_places})
-    token_name: str = field(metadata={"choices": get_token_names})
+    place: str = field(metadata={"choices": lambda: places_str(is_source)})
     transition: str
 
 
 @dataclass(frozen=True)
 class OutputArc:
-    place: Place = field(metadata={"choices": get_places})
+    place: str = field(metadata={"choices": lambda: places_str(is_sink)})
     produce_token: TokenValue
     transition: str
 
@@ -107,7 +129,6 @@ class Guard:
 @dataclass(frozen=True)
 class Transition:
     name: str
-    state_change: str
     inputs: list[InputArc]
     outputs: list[OutputArc]
     guard: list[Guard]
@@ -221,7 +242,5 @@ Return a single, syntactically valid block combining:
 - Guards reference only those variables.
 - Each output token matches the color set of its target place.
 - No place is left untyped.
-- The model satisfies any mandatory constraints stated in the prompt.
 
-End of instructions
 """

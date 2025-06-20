@@ -11,6 +11,7 @@ from functools import lru_cache
 from inspect import isclass
 from enum import Enum, StrEnum
 from textwrap import dedent
+from contextlib import redirect_stdout, redirect_stderr
 
 from dataclasses import (
     make_dataclass,
@@ -23,7 +24,6 @@ from dataclasses import (
 
 import requests
 import llama_cpp
-from contextlib import redirect_stdout, redirect_stderr
 
 
 class_names_mapping = {}
@@ -48,7 +48,10 @@ def serialize(obj):
 @lru_cache
 def convert_field(cls, field):
     class_name = cls.__name__
-    field_type = field.type
+    if getattr(field, "type", None):
+        field_type = field.type
+    else:
+        field_type = field
 
     mapping = {
         int: {"type": "integer"},
@@ -74,7 +77,7 @@ def convert_field(cls, field):
         object.__setattr__(new_field, "type", actual_type)
         return convert_field(cls, new_field)
 
-    elif "choices" in field.metadata:
+    elif "choices" in getattr(field, "metadata", {}):
         choices = field.metadata["choices"]
 
         if callable(choices):
@@ -159,11 +162,20 @@ def convert_field(cls, field):
             }
 
 
+def is_dataclass_type(obj):
+    return isinstance(obj, type) and is_dataclass(obj)
+
+
+def is_dataclass_instance(obj):
+    return is_dataclass(obj) and not isinstance(obj, type)
+
+
 def to_const_json_schema(instance):
     """
-    Recursively turns a dataclass instance into a JSON Schema dict with all attributes as const.
+    Turns an object into a JSON Schema dict with all attributes as const.
     """
-    if is_dataclass(instance):
+
+    if is_dataclass_instance(instance):
         class_names_mapping[instance.__class__.__name__] = instance.__class__
         properties = {"_type": {"const": type(instance).__name__}}
         required = ["_type"]
@@ -176,6 +188,8 @@ def to_const_json_schema(instance):
             "properties": properties,
             "required": required,
         }
+    elif is_dataclass_type(instance):
+        return to_json_schema(instance)
     elif isinstance(instance, Enum):
         return {"const": instance.value}
     elif isinstance(instance, list):
@@ -442,61 +456,76 @@ class HTTP:
 
 @dataclass
 class LLamaCPP:
-    """
-    llama.cpp wrapper using llama-cpp-python
-    """
-
-    model: str = "/path/to/any/gguf/model"
+    model: str = ""
+    embedding_model: str = ""
+    reranker_model: str = ""
     n_ctx: int = 4_000
     n_gpu_layers: int = 100
     n_threads: int = 1
 
-    def __post_init__(self):
-        self.model_path = os.path.expanduser(self.model)
-
     def __enter__(self):
-        return self
+        path = self.model or self.embedding_model or self.reranker_model_path
+        path = os.path.expanduser(path)
+        embedding = (
+            (not self.model)
+            and self.embedding_model
+            and (not self.reranker_model_path)
+        )
+        reranking = (
+            (not self.model)
+            and (not self.embedding_model)
+            and self.reranker_model_path
+        )
+        pooling_type = llama_cpp.LLAMA_POOLING_TYPE_UNSPECIFIED
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        pass
+        if embedding:
+            pooling_type = llama_cpp.LLAMA_POOLING_TYPE_MEAN
+        elif reranking:
+            pooling_type = llama_cpp.LLAMA_POOLING_TYPE_RANK
 
-    def generate(self, prompt="", system_prompt="You are a helpful assistant"):
-        payload = prepare(None, prompt, system_prompt)
+        kwargs = {
+            "model_path": path,
+            "embedding": embedding,
+            "pooling_type": pooling_type,
+            "n_ctx": self.n_ctx,
+            "n_gpu_layers": self.n_gpu_layers,
+            "n_threads": self.n_threads,
+            "verbose": self.verbose,
+        }
 
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
-                self._llm = llama_cpp.Llama(
-                    self.model_path,
-                    n_ctx=self.n_ctx,
-                    n_gpu_layers=self.n_gpu_layers,
-                    n_threads=self.n_threads,
-                    verbose=False,
-                )
+                self._llm = llama_cpp.Llama(**kwargs)
 
-                response = self._llm.create_chat_completion(
-                    messages=payload["messages"],
-                )
-                del self._llm
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        del self._llm
+
+    def rank(self, query, docs):
+        response = self._llm.rank(query, docs)
+        return response
+
+    def generate_embeddings(self, text):
+        response = self._llm.create_embedding(text)
+        return response
+
+    def generate(self, prompt="", system_prompt="You are a helpful assistant"):
+        payload = prepare(None, prompt, system_prompt)
+        response = self._llm.create_chat_completion(
+            messages=payload["messages"],
+        )
+
         return parse_response(response)
 
     def parse(self, data_class, prompt="", system_prompt="Answer in JSON"):
         payload = prepare(data_class, prompt, system_prompt)
 
-        with open(os.devnull, "w") as fnull:
-            with redirect_stdout(fnull), redirect_stderr(fnull):
-                self._llm = llama_cpp.Llama(
-                    self.model_path,
-                    n_ctx=self.n_ctx,
-                    n_gpu_layers=self.n_gpu_layers,
-                    n_threads=self.n_threads,
-                    verbose=False,
-                )
+        response = self._llm.create_chat_completion(
+            messages=payload["messages"],
+            temperature=payload["temperature"],
+            tools=payload["tools"],
+            tool_choice=payload["tool_choice"],
+        )
 
-                response = self._llm.create_chat_completion(
-                    messages=payload["messages"],
-                    temperature=payload["temperature"],
-                    tools=payload["tools"],
-                    tool_choice=payload["tool_choice"],
-                )
-                del self._llm
         return parse_response(response, data_class)
