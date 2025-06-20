@@ -464,17 +464,17 @@ class LLamaCPP:
     n_threads: int = 1
 
     def __enter__(self):
-        path = self.model or self.embedding_model or self.reranker_model_path
+        path = self.model or self.embedding_model or self.reranker_model
         path = os.path.expanduser(path)
         embedding = (
             (not self.model)
             and self.embedding_model
-            and (not self.reranker_model_path)
+            and (not self.reranker_model)
         )
         reranking = (
             (not self.model)
             and (not self.embedding_model)
-            and self.reranker_model_path
+            and self.reranker_model
         )
         pooling_type = llama_cpp.LLAMA_POOLING_TYPE_UNSPECIFIED
 
