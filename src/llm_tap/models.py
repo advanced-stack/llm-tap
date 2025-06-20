@@ -13,6 +13,11 @@ _place_registry = {}
 _token_type_registry = {}
 
 
+def clear():
+    _place_registry.clear()
+    _token_type_registry.clear()
+
+
 def register_token_type(place, token_type):
     key = (place.name, place.token_type.name)
     _token_type_registry[key] = token_type
