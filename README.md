@@ -2,7 +2,7 @@
 
 `llm-tap` is a lightweight and extensible library to generate workflows using Large Language Models (LLMs). `llm-tap` provides mechanisms and data structures to generate workflows and constraints for any existing workflow engine.
 
-`llm-tap` is *not* a workflow library but a workflow generator.
+`llm-tap` is *not* a workflow library but should be used to design a workflow generator with LLMs.
 
 ## Quickstart
 
@@ -16,6 +16,8 @@ To generate a workflow, `llm-tap` uses Colored Petri Nets to describe the differ
 ```python
 from llm_tap import llm
 from llm_tap.models import (
+    SOURCE,
+    SINK,
     Workflow,
     Place,
     TokenType,
@@ -40,7 +42,7 @@ register_place(
     Place(
         name="Power company",
         description="Provides current electricity price",
-        type="source",
+        type=SOURCE,
         token_type=electricity_price,
     )
 )
@@ -49,7 +51,7 @@ register_place(
     Place(
         name="Power charger (plug sensor)",
         description="Provides the status of the plug",
-        type="source",
+        type=SOURCE,
         token_type=car_plugged,
     )
 )
@@ -58,7 +60,7 @@ register_place(
     Place(
         name="Power charger",
         description="Charge electric vehicles",
-        type="sink",
+        type=SINK,
         token_type=charger_enabled,
     )
 )
@@ -67,7 +69,7 @@ register_place(
     Place(
         name="EV monitoring system (range)",
         description="Provides the remaining range in miles",
-        type="source",
+        type=SOURCE,
         token_type=remaining_range,
     )
 )
