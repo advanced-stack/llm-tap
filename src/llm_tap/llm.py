@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
-import time
 import os
-import copy
-import typing
-import types
+import time
 import json
+import types
+import typing
 import logging
 
 from inspect import isclass
@@ -66,14 +65,8 @@ def convert_field(cls, field):
         if caller_fn is None:
             raise ValueError("No callable defined.")
 
-        actual_type = caller_fn()
-
-        if isinstance(actual_type, (list, tuple)):
-            actual_type = actual_type[0]
-
-        new_field = copy.copy(field)
-        object.__setattr__(new_field, "type", actual_type)
-        return convert_field(cls, new_field)
+        field_type = caller_fn()
+        return convert_field(cls, field_type)
 
     elif "choices" in getattr(field, "metadata", {}):
         choices = field.metadata["choices"]
@@ -83,7 +76,6 @@ def convert_field(cls, field):
 
         return {
             "oneOf": [to_const_json_schema(c) for c in choices],
-            "description": f"One of: {', '.join(choices)}",
         }
 
     if field_type in mapping:
@@ -456,7 +448,7 @@ class LLamaCPP:
     reranker_model: str = ""
     n_ctx: int = 4_000
     n_gpu_layers: int = 100
-    n_threads: int = 1
+    n_threads: int = 2
 
     def __enter__(self):
         path = self.model or self.embedding_model or self.reranker_model
@@ -491,6 +483,7 @@ class LLamaCPP:
         with open(os.devnull, "w") as fnull:
             with redirect_stdout(fnull), redirect_stderr(fnull):
                 self._llm = llama_cpp.Llama(**kwargs)
+                self._llm.set_cache(llama_cpp.LlamaRAMCache())
 
         return self
 
